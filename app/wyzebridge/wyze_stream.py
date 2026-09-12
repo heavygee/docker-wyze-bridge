@@ -483,8 +483,6 @@ def setup_audio(sess: WyzeIOTCSession, uri: str) -> Optional[Thread]:
 
 
 def setup_talkback(sess: WyzeIOTCSession, uri: str) -> Optional[Thread]:
-    from wyzebridge.bridge_utils import env_cam
-
     if sess.substream:
         return
     if not env_cam("ENABLE_TALKBACK", uri, style="bool"):

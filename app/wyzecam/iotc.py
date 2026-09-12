@@ -10,6 +10,7 @@ import pathlib
 import time
 import warnings
 from ctypes import CDLL, c_int
+from queue import Empty
 from typing import Any, Iterator, Optional, Union
 
 from wyzecam.api_models import WyzeAccount, WyzeCamera
@@ -625,7 +626,10 @@ class WyzeIOTCSession:
     def _enable_return_audio(self) -> None:
         """Turn on camera speaker path (K10010 media type 3) on this session."""
         with self.iotctrl_mux() as mux:
-            mux.send_ioctl(K10010SetReturnAudio(1)).result(timeout=5)
+            future = mux.send_ioctl(K10010SetReturnAudio(1))
+            # Some firmware never ACKs 10011; still send frames if the wait times out.
+            with contextlib.suppress(Empty, tutk.TutkError):
+                future.result(timeout=5)
         logger.info("[%s] Return audio (talkback) enabled", self.pipe_name)
 
     def send_talk_pipe(self) -> None:
@@ -633,10 +637,11 @@ class WyzeIOTCSession:
         fifo_path = talk_fifo_path(self.pipe_name)
         with contextlib.suppress(FileExistsError):
             os.mkfifo(fifo_path)
+        # Open O_RDWR first so /talk POSTs are not ENXIO while ioctl waits.
+        fd = os.open(fifo_path, os.O_RDWR)
         frame_no = 0
         try:
             self._enable_return_audio()
-            fd = os.open(fifo_path, os.O_RDWR)
             with os.fdopen(fd, "rb", buffering=0) as talk_pipe:
                 logger.info("[%s] Talkback FIFO ready %s", self.pipe_name, fifo_path)
                 while self.should_stream():
@@ -660,6 +665,12 @@ class WyzeIOTCSession:
                                 "[%s] avSendAudioData err=%s", self.pipe_name, err
                             )
                             break
+                        if frame_no == 0:
+                            logger.info(
+                                "[%s] avSendAudioData first frame ok (%s bytes)",
+                                self.pipe_name,
+                                len(frame),
+                            )
                         frame_no += 1
         except tutk.TutkError as ex:
             warnings.warn(ex.name)
