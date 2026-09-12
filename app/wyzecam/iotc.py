@@ -623,32 +623,47 @@ class WyzeIOTCSession:
                 os.unlink(fifo_path)
             warnings.warn("Audio pipe closed")
 
-    def _enable_return_audio(self) -> None:
-        """Turn on camera speaker path (K10010 media type 3) on this session."""
+    def _set_return_audio(self, on: bool) -> None:
+        """Enable or release camera speaker path (K10010 media type 3)."""
         with self.iotctrl_mux() as mux:
-            future = mux.send_ioctl(K10010SetReturnAudio(1))
-            # Some firmware never ACKs 10011; still send frames if the wait times out.
+            future = mux.send_ioctl(K10010SetReturnAudio(1 if on else 2))
             with contextlib.suppress(Empty, tutk.TutkError):
                 future.result(timeout=5)
-        logger.info("[%s] Return audio (talkback) enabled", self.pipe_name)
+        logger.info(
+            "[%s] Return audio (talkback) %s",
+            self.pipe_name,
+            "enabled" if on else "released",
+        )
 
     def send_talk_pipe(self) -> None:
         """Read µ-law frames from a FIFO and send them on the existing AV channel."""
         fifo_path = talk_fifo_path(self.pipe_name)
         with contextlib.suppress(FileExistsError):
             os.mkfifo(fifo_path)
-        # Open O_RDWR first so /talk POSTs are not ENXIO while ioctl waits.
         fd = os.open(fifo_path, os.O_RDWR)
         frame_no = 0
+        return_audio_on = False
+        idle_since: float | None = None
         try:
-            self._enable_return_audio()
             with os.fdopen(fd, "rb", buffering=0) as talk_pipe:
                 logger.info("[%s] Talkback FIFO ready %s", self.pipe_name, fifo_path)
                 while self.should_stream():
                     data = talk_pipe.read(TALK_FRAME_BYTES)
                     if not data:
+                        now = time.time()
+                        if return_audio_on:
+                            if idle_since is None:
+                                idle_since = now
+                            elif now - idle_since >= 1.5:
+                                self._set_return_audio(False)
+                                return_audio_on = False
+                                idle_since = None
                         time.sleep(0.02)
                         continue
+                    idle_since = None
+                    if not return_audio_on:
+                        self._set_return_audio(True)
+                        return_audio_on = True
                     for frame in chunk_mulaw(data):
                         if self.av_chan_id is None:
                             return
@@ -677,6 +692,9 @@ class WyzeIOTCSession:
         except OSError as ex:
             logger.warning("[%s] talkback pipe: %s", self.pipe_name, ex)
         finally:
+            if return_audio_on:
+                with contextlib.suppress(Exception):
+                    self._set_return_audio(False)
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(fifo_path)
             logger.info("[%s] Talkback pipe closed", self.pipe_name)
