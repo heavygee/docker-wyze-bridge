@@ -15,8 +15,16 @@ from typing import Any, Iterator, Optional, Union
 from wyzecam.api_models import WyzeAccount, WyzeCamera
 from wyzecam.tutk import tutk, tutk_ioctl_mux, tutk_protocol
 from wyzecam.tutk.tutk_ioctl_mux import TutkIOCtrlMux
+from wyzebridge.talkback import (
+    CODEC_ID_MULAW,
+    TALK_FRAME_BYTES,
+    audio_frame_info,
+    chunk_mulaw,
+    talk_fifo_path,
+)
 from wyzecam.tutk.tutk_protocol import (
     K10000ConnectRequest,
+    K10010SetReturnAudio,
     K10052DBSetResolvingBit,
     K10056SetResolvingBit,
     respond_to_ioctrl_10001,
@@ -613,6 +621,54 @@ class WyzeIOTCSession:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(fifo_path)
             warnings.warn("Audio pipe closed")
+
+    def _enable_return_audio(self) -> None:
+        """Turn on camera speaker path (K10010 media type 3) on this session."""
+        with self.iotctrl_mux() as mux:
+            mux.send_ioctl(K10010SetReturnAudio(1)).result(timeout=5)
+        logger.info("[%s] Return audio (talkback) enabled", self.pipe_name)
+
+    def send_talk_pipe(self) -> None:
+        """Read µ-law frames from a FIFO and send them on the existing AV channel."""
+        fifo_path = talk_fifo_path(self.pipe_name)
+        with contextlib.suppress(FileExistsError):
+            os.mkfifo(fifo_path)
+        frame_no = 0
+        try:
+            self._enable_return_audio()
+            fd = os.open(fifo_path, os.O_RDWR)
+            with os.fdopen(fd, "rb", buffering=0) as talk_pipe:
+                logger.info("[%s] Talkback FIFO ready %s", self.pipe_name, fifo_path)
+                while self.should_stream():
+                    data = talk_pipe.read(TALK_FRAME_BYTES)
+                    if not data:
+                        time.sleep(0.02)
+                        continue
+                    for frame in chunk_mulaw(data):
+                        if self.av_chan_id is None:
+                            return
+                        info = audio_frame_info(
+                            codec_id=CODEC_ID_MULAW,
+                            frame_no=frame_no,
+                            frame_len=len(frame),
+                        )
+                        err = tutk.av_send_audio_data(
+                            self.tutk_platform_lib, self.av_chan_id, frame, info
+                        )
+                        if err < 0:
+                            logger.warning(
+                                "[%s] avSendAudioData err=%s", self.pipe_name, err
+                            )
+                            break
+                        frame_no += 1
+        except tutk.TutkError as ex:
+            warnings.warn(ex.name)
+        except OSError as ex:
+            logger.warning("[%s] talkback pipe: %s", self.pipe_name, ex)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(fifo_path)
+            logger.info("[%s] Talkback pipe closed", self.pipe_name)
 
     def _sync_audio_frame(self, frame_info):
         # Some cams can't sync

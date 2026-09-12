@@ -64,6 +64,7 @@ SET_CMDS = {
     "spotlight": "K10646SetSpotlightStatus",
     "floodlight": "K12060SetFloodLightSwitch",
     "format_sd": "K10242FormatSDCard",
+    "return_audio": "K10010SetReturnAudio",
 }
 
 CMD_VALUES = {

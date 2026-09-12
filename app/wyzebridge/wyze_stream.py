@@ -429,13 +429,14 @@ def start_tutk_stream(uri: str, stream: StreamTuple, queue: QueueTuple, state: c
     was_offline = state.value == StreamStatus.OFFLINE
     state.value = StreamStatus.CONNECTING
     exit_code = StreamStatus.STOPPING
-    control_thread = audio_thread = None
+    control_thread = audio_thread = talk_thread = None
     try:
         with WyzeIOTC() as iotc, iotc.session(stream, state) as sess:
             assert state.value >= StreamStatus.CONNECTING, "Stream Stopped"
             v_codec, audio = get_cam_params(sess, uri)
             control_thread = setup_control(sess, queue, stream.options.substream)
             audio_thread = setup_audio(sess, uri)
+            talk_thread = setup_talkback(sess, uri)
 
             ffmpeg_cmd = get_ffmpeg_cmd(uri, v_codec, audio, stream.camera.is_vertical)
             assert state.value >= StreamStatus.CONNECTING, "Stream Stopped"
@@ -463,6 +464,7 @@ def start_tutk_stream(uri: str, stream: StreamTuple, queue: QueueTuple, state: c
     finally:
         state.value = exit_code
         stop_and_wait(audio_thread)
+        stop_and_wait(talk_thread)
         stop_and_wait(control_thread)
 
 
@@ -478,6 +480,18 @@ def setup_audio(sess: WyzeIOTCSession, uri: str) -> Optional[Thread]:
     audio_thread = Thread(target=sess.recv_audio_pipe, name=f"{uri}_audio")
     audio_thread.start()
     return audio_thread
+
+
+def setup_talkback(sess: WyzeIOTCSession, uri: str) -> Optional[Thread]:
+    from wyzebridge.bridge_utils import env_cam
+
+    if sess.substream:
+        return
+    if not env_cam("ENABLE_TALKBACK", uri, style="bool"):
+        return
+    talk_thread = Thread(target=sess.send_talk_pipe, name=f"{uri}_talk")
+    talk_thread.start()
+    return talk_thread
 
 
 def setup_control(

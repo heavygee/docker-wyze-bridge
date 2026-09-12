@@ -624,6 +624,28 @@ def av_recv_audio_data(tutk_platform_lib: CDLL, av_chan_id: c_int):
     return 0, audio_data, frame_info
 
 
+def av_send_audio_data(
+    tutk_platform_lib: CDLL,
+    av_chan_id: c_int,
+    audio_data: bytes,
+    frame_info: FrameInfo3Struct,
+) -> int:
+    """Send one audio frame to the camera speaker (talkback).
+
+    Same-session as av_recv_audio_data — do not open a second IOTC client.
+    """
+    buf = create_string_buffer(audio_data, len(audio_data))
+    return int(
+        tutk_platform_lib.avSendAudioData(
+            av_chan_id,
+            buf,
+            len(audio_data),
+            byref(frame_info),
+            sizeof(frame_info),
+        )
+    )
+
+
 def av_check_audio_buf(tutk_platform_lib: CDLL, av_chan_id: c_int) -> int:
     """Get the frame count of audio buffer remaining in the queue."""
     return tutk_platform_lib.avCheckAudioBuf(av_chan_id)

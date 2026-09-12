@@ -271,6 +271,27 @@ WebRTC should work automatically in Home Assistant mode, however, some additiona
   ```
 - See [documentation](https://github.com/aler9/rtsp-simple-server#usage-inside-a-container-or-behind-a-nat) for additional information/options.
 
+## Two-way audio (talkback)
+
+Wyze's LAN session is single-client. Talkback **must** use the same TUTK session as the live stream (opening the Wyze app or a second client will kick the bridge).
+
+Experimental (see [issue #533](https://github.com/mrlt8/docker-wyze-bridge/issues/533)):
+
+```yaml
+environment:
+  - ENABLE_AUDIO=True
+  - ENABLE_TALKBACK=True   # default off
+```
+
+Then `POST` µ-law 8 kHz (`audio/basic`) or PCM16LE (`audio/l16`) to `/talk/<cam-uri>` (same WebUI auth as `/api/...`). Example:
+
+```bash
+ffmpeg -f pulse -i default -ac 1 -ar 8000 -f mulaw pipe:1 | \
+  curl -u user:pass --data-binary @- http://127.0.0.1:5000/talk/living-room-cam
+```
+
+`SET /api/<cam>/return_audio/on` turns the speaker path on without sending audio.
+
 ## Advanced Options
 
 All environment variables are optional.

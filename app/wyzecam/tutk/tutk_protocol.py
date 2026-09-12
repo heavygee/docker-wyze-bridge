@@ -325,6 +325,22 @@ class K10010ControlChannel(TutkWyzeProtocolMessage):
         return encode(self.code, bytes([self.media_type, self.enabled]))
 
 
+class K10010SetReturnAudio(TutkWyzeProtocolMessage):
+    """Enable or disable camera speaker / talkback (K10010 media type 3).
+
+    Payload convention matches other SET commands: 1 = on, 2 = off.
+    """
+
+    def __init__(self, value: int = 1):
+        super().__init__(10010)
+        enabled = 1 if value in (1, True) else 2
+        self.media_type = 3
+        self.enabled = enabled
+
+    def encode(self) -> bytes:
+        return encode(self.code, bytes([self.media_type, self.enabled]))
+
+
 class K10020CheckCameraInfo(TutkWyzeProtocolMessage):
     """
     A command used to read the current settings of the camera.

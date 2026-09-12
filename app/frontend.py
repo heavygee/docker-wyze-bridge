@@ -140,6 +140,32 @@ def create_app():
             return cam | web_ui.format_stream(cam_name)
         return {"error": f"Could not find camera [{cam_name}]"}
 
+    @app.route("/talk/<string:cam_name>", methods=["POST"])
+    @auth_required
+    def talk(cam_name):
+        """Push µ-law or PCM16LE audio to the camera speaker (same TUTK session)."""
+        from wyzebridge.talkback import ingest_talk_payload
+
+        info = wb.streams.get_info(cam_name)
+        if not info:
+            return {"error": f"Could not find camera [{cam_name}]"}, 404
+        uri = info.get("name_uri") or cam_name
+        try:
+            n = ingest_talk_payload(
+                uri,
+                request.get_data(cache=False) or b"",
+                request.content_type or "",
+            )
+        except FileNotFoundError:
+            return {
+                "error": "talkback not ready (set ENABLE_TALKBACK=True and wait for stream)"
+            }, 503
+        except BlockingIOError:
+            return {"error": "talkback busy"}, 503
+        except OSError as ex:
+            return {"error": str(ex)}, 503
+        return {"status": "ok", "bytes": n}
+
     @app.route("/api/<cam_name>/<cam_cmd>", methods=["GET", "PUT", "POST"])
     @app.route("/api/<cam_name>/<cam_cmd>/<path:payload>")
     @auth_required
