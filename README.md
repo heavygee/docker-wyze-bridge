@@ -273,7 +273,7 @@ WebRTC should work automatically in Home Assistant mode, however, some additiona
 
 ## Two-way audio (talkback)
 
-Wyze's LAN session is single-client. Talkback **must** use the same TUTK session as the live stream (opening the Wyze app or a second client will kick the bridge).
+Wyze viewing can share a session with the bridge on some firmware; **talk is exclusive**. The bridge only asserts K10010 Return Audio while talk frames are actually being sent, then releases it after ~1.5s idle so the official app can speak again. Do not open a second TUTK talk client.
 
 Experimental (see [issue #533](https://github.com/mrlt8/docker-wyze-bridge/issues/533)):
 
